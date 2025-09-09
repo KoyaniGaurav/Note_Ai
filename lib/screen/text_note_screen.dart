@@ -1,6 +1,8 @@
+// screens/text_note_screen.dart
 import 'package:flutter/material.dart';
 import 'package:note_ai/models/note_model.dart';
 import 'package:note_ai/services/firebase_service.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class TextNoteScreen extends StatefulWidget {
   const TextNoteScreen({super.key});
@@ -12,44 +14,60 @@ class TextNoteScreen extends StatefulWidget {
 class _TextNoteScreenState extends State<TextNoteScreen> {
   final TextEditingController _titleController = TextEditingController();
   final TextEditingController _contentController = TextEditingController();
-
   bool isSaving = false;
   String? aiSummary;
   DateTime? reminderTime;
 
   Future<void> _saveNote() async {
-    if (_titleController.text.trim().isEmpty || _contentController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Title and content are required')),
-      );
-      Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+    final title = _titleController.text.trim();
+    final content = _contentController.text.trim();
+    if (title.isEmpty || content.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Title and content are required')));
+      return;
     }
 
     setState(() => isSaving = true);
 
+    final now = DateTime.now();
     final note = NoteModel(
       id: '',
-      title: _titleController.text.trim(),
-      content: _contentController.text.trim(),
+      title: title,
+      content: content,
       type: 'text',
-      createdAt: DateTime.now(),
-      updatedAt: DateTime.now(),
+      createdAt: now,
+      updatedAt: now,
       summary: aiSummary,
       aiAnswer: null,
       reminderTime: reminderTime,
+      password: null,
     );
 
-    await FirebaseService().addNote(note);
-
-    setState(() => isSaving = false);
-
-    Navigator.pop(context);
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      print('DEBUG: currentUser = $user');
+      print('DEBUG: currentUser.uid = ${user?.uid}');
+      if (user == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('You must sign in first')));
+        return;
+      }
+      final id = await FirebaseService().addNote(note);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Note saved successfully.')),
+      );
+      Navigator.pop(context, id);
+    } catch (e) {
+      print('DEBUG: Failed to save note exception: $e');
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to save note: $e')));
+    }
+    finally {
+      if (mounted) setState(() => isSaving = false);
+    }
   }
 
   Future<void> _setReminder() async {
     final DateTime? picked = await showDatePicker(
       context: context,
-      initialDate: DateTime.now().add(Duration(days: 1)),
+      initialDate: DateTime.now().add(const Duration(days: 1)),
       firstDate: DateTime.now(),
       lastDate: DateTime(2100),
     );
@@ -59,19 +77,19 @@ class _TextNoteScreenState extends State<TextNoteScreen> {
         context: context,
         initialTime: TimeOfDay.now(),
       );
-
       if (time != null) {
         setState(() {
-          reminderTime = DateTime(
-            picked.year,
-            picked.month,
-            picked.day,
-            time.hour,
-            time.minute,
-          );
+          reminderTime = DateTime(picked.year, picked.month, picked.day, time.hour, time.minute);
         });
       }
     }
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _contentController.dispose();
+    super.dispose();
   }
 
   @override
@@ -90,22 +108,13 @@ class _TextNoteScreenState extends State<TextNoteScreen> {
         padding: const EdgeInsets.all(16),
         child: ListView(
           children: [
-            TextField(
-              controller: _titleController,
-              decoration: const InputDecoration(labelText: 'Title'),
-            ),
+            TextField(controller: _titleController, decoration: const InputDecoration(labelText: 'Title')),
             const SizedBox(height: 12),
-            TextField(
-              controller: _contentController,
-              decoration: const InputDecoration(labelText: 'Content'),
-              maxLines: 8,
-            ),
+            TextField(controller: _contentController, decoration: const InputDecoration(labelText: 'Content'), maxLines: 8),
             const SizedBox(height: 12),
             ElevatedButton.icon(
               icon: const Icon(Icons.access_alarm),
-              label: Text(reminderTime == null
-                  ? 'Set Reminder'
-                  : 'Reminder: ${reminderTime.toString().split('.')[0]}'),
+              label: Text(reminderTime == null ? 'Set Reminder' : 'Reminder: ${reminderTime.toString().split('.')[0]}'),
               onPressed: _setReminder,
             ),
             const SizedBox(height: 16),
@@ -113,7 +122,6 @@ class _TextNoteScreenState extends State<TextNoteScreen> {
               icon: const Icon(Icons.auto_fix_high),
               label: const Text('Get AI Summary'),
               onPressed: () async {
-                // TODO: Call your AI summarization logic here
                 setState(() {
                   aiSummary = 'This is a placeholder summary generated by AI.';
                 });

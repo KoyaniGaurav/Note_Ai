@@ -1,16 +1,16 @@
+// services/firebase_service.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:note_ai/models/user_model.dart';
+import '../models/user_model.dart';
 import '../models/note_model.dart';
 
-// this is fire base service that will handle all the firebase operations like add , get , update and delete notes.
 class FirebaseService {
-
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   Future<void> createUserIfNotExists(User user) async {
     final docRef = _firestore.collection('users').doc(user.uid);
     final doc = await docRef.get();
-
     if (!doc.exists) {
       final newUser = UserModel(
         uid: user.uid,
@@ -25,68 +25,53 @@ class FirebaseService {
 
   Future<String?> getSecureNotePassword(String userId) async {
     if (userId.isEmpty) throw Exception("Invalid userId passed to getSecureNotePassword");
-
-    final doc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(userId)
-        .get();
+    final doc = await _firestore.collection('users').doc(userId).get();
     return doc.data()?['secureNotePassword'];
   }
 
-
   Future<void> setSecureNotePassword(String userId, String password) async {
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(userId)
-        .set({'secureNotePassword': password}, SetOptions(merge: true));
+    await _firestore.collection('users').doc(userId).set({'secureNotePassword': password}, SetOptions(merge: true));
   }
 
   Future<void> addSecureNote(String userId, NoteModel note) async {
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(userId)
-        .collection('secureNotes')
-        .add(note.toMap());
+    await _firestore.collection('users').doc(userId).collection('secureNotes').add(note.toMap());
+  }
+
+  Future<String> addNote(NoteModel note) async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) throw Exception("User not logged in");
+
+      final notesRef = _firestore.collection('users').doc(user.uid).collection('notes');
+      final docRef = note.id.isNotEmpty ? notesRef.doc(note.id) : notesRef.doc();
+      final payload = note.toMap();
+      print('DEBUG: writing note to path=${docRef.path} payload=$payload');
+      await docRef.set(payload);
+      print('DEBUG: write OK to ${docRef.path}');
+      return docRef.id;
+    } catch (e) {
+      print('DEBUG: Error adding note: $e');
+      rethrow;
+    }
   }
 
 
-  // to work with firebase first we need ins. of the auth to check is user is their or not.
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-
-  // then is user so we want to do crud op. so need to of firestore.
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-
-  Future<void> addNote(NoteModel note) async {
-    final user = _auth.currentUser;
-    if (user == null) throw Exception("User not logged in");
-
-    await _firestore
-        .collection('users')
-        .doc(user.uid)
-        .collection('notes')
-        .add(note.toMap());
-  }
 
   Future<List<NoteModel>> getNotes() async {
     final user = _auth.currentUser;
     if (user == null) throw Exception("User not logged in");
-
     final snapshot = await _firestore
         .collection('users')
         .doc(user.uid)
         .collection('notes')
         .orderBy('createdAt', descending: true)
         .get();
-
-    return snapshot.docs
-        .map((doc) => NoteModel.fromMap(doc.id, doc.data()))
-        .toList();
+    return snapshot.docs.map((doc) => NoteModel.fromMap(doc.id, doc.data())).toList();
   }
 
   Future<void> updateNote(NoteModel note) async {
     final user = _auth.currentUser;
     if (user == null) throw Exception("User not logged in");
-
     await _firestore
         .collection('users')
         .doc(user.uid)
@@ -98,7 +83,6 @@ class FirebaseService {
   Future<void> deleteNote(String noteId) async {
     final user = _auth.currentUser;
     if (user == null) throw Exception("User not logged in");
-
     await _firestore
         .collection('users')
         .doc(user.uid)
